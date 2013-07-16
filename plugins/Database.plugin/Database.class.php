@@ -54,12 +54,7 @@ class Database
      * @category Plugin name
      */
     const PLUGIN_NAME = "Database.plugin";
-    
-    /*
-     * @internal
-     */
-    const AUTO_QUERY_TYPE = "SELECT";
-    
+        
     /*
      * @internal
      */
@@ -67,7 +62,8 @@ class Database
         "AUTH",
         "DATABASE",
         "ERROR_MESSAGES",
-        "CHARSETS"
+        "CHARSETS",
+        "ERROR_NUMBERS"
     ];
     
     /*
@@ -88,6 +84,8 @@ class Database
     
     protected $querys;
     
+    protected $types = [];
+    
     protected $result;
     
     /*
@@ -96,7 +94,7 @@ class Database
      */
     public function __construct()
     {
-        
+
         if (isset($GLOBALS["PARSED_INI_FILES"][self::PLUGIN_NAME]))
         {
             $this->ini = $GLOBALS["PARSED_INI_FILES"][self::PLUGIN_NAME];
@@ -123,12 +121,35 @@ class Database
 
         $this->mysqli->set_charset($this->ini["CHARSETS"]["mysqli_charset"]);
         
+        $this->mysqli->autocommit(false);
+        
         if ($this->mysqli->errno !== 0)
         {
             throw new DatabaseException(sprintf($this->ini["ERROR_MESSAGES"]["ERROR_OCCURED"], $this->mysqli->errno, $this->mysqli->error));
         }
     }
 
+    protected static function detectFn($query)
+    {
+        $type = [
+            "select" => "SELECT",
+            "insert-into" => "INSERT INTO",
+            "drop" => "DROP",
+            "update" => "UPDATE",
+            "delete" => "DELETE FROM",
+            "alter-table" => "ALTER TABLE"
+        ];
+        $fn = "";
+        foreach ($type as $key => $value)
+        {
+            if (Helpers::contains($query, $value))
+            {
+                $fn = $key;
+            }
+        }
+        return $fn;
+    }
+    
     /*
      * @param [object String $query1, object String $query2, ...]
      * @return object Database
@@ -147,12 +168,15 @@ class Database
                 throw new RuntimeException($this->ini["ERROR_MESSAGES"]["NOT_STR_OBJECT"]);
             }
             $args[$i] = $args[$i]->getValue();
-            if (!Helpers::contains($args[$i], "UPDATE") || !Helpers::contains($args[$i], "DROP") || !Helpers::contains($args[$i], "INSERT INTO") || !Helpers::contains($args[$i], "SELECT"))
-            {
-                $args[$i] = self::AUTO_QUERY_TYPE." ".$args[$i];
-            }
             $this->querys = $args;
-            $this->prepare["prepare"][$i] = $this->mysqli->prepare($args[$i]);
+            $this->types[$i] = static::detectFn($args[$i]);
+            if (!($this->prepare["prepare"][$i] = $this->mysqli->prepare($args[$i])))
+            {
+                if ($this->mysqli->errno === (int) $this->ini["ERROR_NUMBERS"]["SQL_SYNTAX_ERROR"])
+                {
+                    throw new DatabaseException(sprintf($this->ini["ERROR_MESSAGES"]["QUERY_ERROR"], $this->mysqli->error));  
+                }
+            }
             ++$i;
         }
         return $this;
@@ -206,8 +230,14 @@ class Database
         $i = 0;
         while ($i < $this->prepare["num"])
         {
-            $this->prepare["prepare"][$i]->execute(); // important!            
-            $fetch[$i] = $this->fetch($this->prepare["prepare"][$i]);
+            $this->prepare["prepare"][$i]->execute(); // important!
+            if ($this->types[$i] === "select")
+            {
+                $fetch[$i] = $this->fetch($this->prepare["prepare"][$i]);
+            } else if ($this->types[$i] === "insert-into")
+            {
+                $fetch[$i] = $this->prepare["prepare"][$i]->affected_rows;
+            }
             $this->prepare["prepare"][$i]->close();
             ++$i;
         }
@@ -272,6 +302,19 @@ class Database
         return $this;
     }
     
+    public function next()
+    {
+        $this->stmt = null;
+        $this->prepare = [
+            "num" => 0,
+            "prepare" => []
+        ];
+        $this->bind = null;
+        $this->querys = null;
+        $this->types = [];
+        return $this->free();
+    }
+    
     /*
      * @return object Database
      */
@@ -287,5 +330,15 @@ class Database
     public function getMysqli()
     {
         return $this->mysqli;
+    }
+
+    /*
+     * @tutorial
+     * $db = (new Database)->killThread();
+     * $db->getMysqli()->query("SELECT * FROM ..."); // will produce the error: MySQL server has gone away
+     */
+    public function killThread()
+    {
+        $this->mysqli->kill($this->mysqli->thread_id);
     }
 }
