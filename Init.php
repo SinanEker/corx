@@ -341,7 +341,7 @@ if (ENABLE_PLUGINS === true)
                 continue;
             }
             $PARSED_INI[$value] = parse_ini_file( PLUGIN_DIR."/" .$value . "/Config.ini", true);
-            require_once PLUGIN_DIR."/".$value."/excpetions/".trim($value, ".plugin").".exception.php";
+            require_once PLUGIN_DIR."/".$value."/exceptions/".trim($value, ".plugin").".exception.php";
             require_once PLUGIN_DIR."/".$value."/".trim($value, ".plugin").".class.php";
         }
         return $PARSED_INI;
