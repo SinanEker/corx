@@ -91,6 +91,11 @@ class Database
     /*
      * @param [void]
      * @return void
+     * @description:
+     * * Reads the ini file
+     * * Establish a mysql server connection via mysqli
+     * * Sets the charset
+     * * Checks if errors occured
      */
     public function __construct()
     {
@@ -280,6 +285,8 @@ class Database
     /*
      * @param [bool $free = false] Auto frees the result. Equal to Database::free(); @see const Database::FREE_MEMORY
      * @return array Database::$result
+     * @description:
+     * * Returns the last result of a query.
      */
     public function getResult($free = false)
     {
@@ -295,6 +302,8 @@ class Database
     
     /*
      * @return object Database
+     * @description:
+     * * Sets the Database::$result to null
      */
     public function free()
     {
