@@ -22,11 +22,8 @@ trait Helpers
         if (ARGUMENTS_EXCEPTION === false)
         {
             return void;
-        } else {
-            if ($count === 0)
-            {
-                throw new \InvalidArgumentException("Not enaught arguments given!");
-            }
+        } else if ($count === 0){
+            throw new \InvalidArgumentException("Not enaught arguments given!");
         }
     }
 
@@ -43,9 +40,9 @@ trait Helpers
     {
         $args = func_get_args();
         $count = count($args);
+        static::noArgsException($count);
         $i = 0;
         $dump = [];
-        static::noArgsException($count);
         while ($i < $count)
         {
             ob_start();
