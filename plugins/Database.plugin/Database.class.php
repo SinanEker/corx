@@ -1,13 +1,68 @@
 <?php
+/*
+ * @name Database.class.php
+ * @package Database
+ * 
+ * @copyright:
+ * * Copyright (c) 2013, Sinan Eker, Selsyourself, inc.
+ * * All rights reserved.
+ * * --------------------------------------------------------------------------------
+ * * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"    +
+ * * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE      +
+ * * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE +
+ * * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE    +
+ * * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL     +
+ * * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR     +
+ * * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER     +
+ * * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,  +
+ * * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE  +
+ * * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.           +
+ * * --------------------------------------------------------------------------------
+ * */
+
 namespace Plugins\Database;
 use \Plugins\Database\DatabaseException;
 use \RuntimeException;
 use \mysqli;
 use \Helpers\Helpers as Helpers;
+/*
+ * @package Database
+ * @author Sinan Eker <selsyourself@gmail.com>
+ * @category SQL / MYSQLI
+ * @tutorial:
+ * $db = new Database();
+   $result = $db->prepare(
+        String("id FROM test WHERE id = ?"),
+        String("value FROM test2 WHERE id = ?"),
+        String("id, value FROM test2 WHERE value = ?")
+    )
+    ->bind(
+        ["i" => 1],
+        ["i" => 2],
+        ["s" => "testVal123456789"]
+    )
+    ->execute()
+    ->close()
+    ->getResult(Database::FREE_MEMORY);
+    var_dump($result);
+ */
 class Database 
 {
+    const FREE_MEMORY = true; // using this will free the result. Equal to Database::free()
+    
+    /*
+     * @category Plugin name
+     */
     const PLUGIN_NAME = "Database.plugin";
     
+    /*
+     * @internal
+     */
+    const AUTO_QUERY_TYPE = "SELECT";
+    
+    /*
+     * @internal
+     */
     var $required = [
         "AUTH",
         "DATABASE",
@@ -15,6 +70,9 @@ class Database
         "CHARSETS"
     ];
     
+    /*
+     * @internal
+     */
     var $ini;
     
     protected $mysqli;
@@ -30,6 +88,12 @@ class Database
     
     protected $querys;
     
+    protected $result;
+    
+    /*
+     * @param [void]
+     * @return void
+     */
     public function __construct()
     {
         
@@ -65,6 +129,10 @@ class Database
         }
     }
 
+    /*
+     * @param [object String $query1, object String $query2, ...]
+     * @return object Database
+     */
     public function prepare()
     {
         $args = func_get_args();
@@ -79,9 +147,9 @@ class Database
                 throw new RuntimeException($this->ini["ERROR_MESSAGES"]["NOT_STR_OBJECT"]);
             }
             $args[$i] = $args[$i]->getValue();
-            if (!Helpers::contains($args[$i], "SELECT"))
+            if (!Helpers::contains($args[$i], "UPDATE") || !Helpers::contains($args[$i], "DROP") || !Helpers::contains($args[$i], "INSERT INTO") || !Helpers::contains($args[$i], "SELECT"))
             {
-                $args[$i] = "SELECT ".$args[$i];
+                $args[$i] = self::AUTO_QUERY_TYPE." ".$args[$i];
             }
             $this->querys = $args;
             $this->prepare["prepare"][$i] = $this->mysqli->prepare($args[$i]);
@@ -92,6 +160,7 @@ class Database
     
     /*
      * @param [array &$bind]
+     * @return object Database
      * @description:
      * * Param:
      * * * ["bind_datatype" => $value]
@@ -128,57 +197,93 @@ class Database
         return $this;
     }
     
+    /*
+     * @return object Database
+     */
     public function execute()
     {
         $fetch = [];
         $i = 0;
         while ($i < $this->prepare["num"])
         {
+            $this->prepare["prepare"][$i]->execute(); // important!            
             $fetch[$i] = $this->fetch($this->prepare["prepare"][$i]);
             $this->prepare["prepare"][$i]->close();
             ++$i;
         }
-        return $fetch;
+        $this->result = $fetch;
+        return $this;
     }
     
+    /*
+     * @param [mysqli_stmt $stmt]
+     * @return array $results
+     */
     public function fetch(\mysqli_stmt $stmt)
     {
-        $vars = [];
-        $data = [];
-        foreach (Helpers::referenceValues((array) $stmt->result_metadata()->fetch_field()) as $key => $value)
+        $array = [];
+        $fieldNames = [];
+        $result = $stmt->get_result();
+        foreach ((array) $stmt->result_metadata()->fetch_fields() as $key => $value)
         {
-            if ($key === "name")
+            foreach ($value as $key2 => $value2)
             {
-                $vars[] = $value;
+                if ($key2 === "name")
+                {
+                    $fieldNames[] = $value2;
+                }   
             }
         }
-        return call_user_func_array([$stmt, "bind_result"], $vars);
-        /*
-        $stmt->store_result();
-        
-        $vars = [];
-        $data = [];
-        $meta = $stmt->result_metadata();
-        
-        while ($field = $meta->fetch_field())
-        {
-            $vars[] = &$data[$field->name];
-        }
-        call_user_func_array([$stmt, "bind_result"], $vars);
-        
         $i = 0;
-        while ($stmt->fetch())
+        while ($i < count($fieldNames))
         {
-            $array[$i] = [];
-            foreach ($data as $key => $value)
+            while ($row = $result->fetch_array(MYSQLI_NUM))
             {
-                $array[$i][$key] = $value;
+                $array[$fieldNames[$i]] = $row;
             }
-            $i++;
+            ++$i;
         }
-        */
+        $stmt->free_result();
+        return $array;
     }
     
+    /*
+     * @param [bool $free = false] Auto frees the result. Equal to Database::free(); @see const Database::FREE_MEMORY
+     * @return array Database::$result
+     */
+    public function getResult($free = false)
+    {
+        if ($free === self::FREE_MEMORY)
+        {
+            $result = $this->result;
+            $this->free();
+            return $result;
+        } else {
+            return $this->result;
+        }
+    }
+    
+    /*
+     * @return object Database
+     */
+    public function free()
+    {
+        $this->result = null;
+        return $this;
+    }
+    
+    /*
+     * @return object Database
+     */
+    public function close()
+    {
+        $this->mysqli->close();
+        return $this;
+    }
+    
+    /*
+     * @return mysqli Database::$mysqli
+     */
     public function getMysqli()
     {
         return $this->mysqli;
